@@ -13,12 +13,7 @@ fn bench_clipping_profile(c: &mut Criterion) {
     c.bench_function("rsomics-clipping-profile golden", |b| {
         b.iter(|| {
             let out = Command::new(black_box(bin))
-                .args([
-                    "-i",
-                    bam.to_str().unwrap(),
-                    "-o",
-                    prefix.to_str().unwrap(),
-                ])
+                .args(["-i", bam.to_str().unwrap(), "-o", prefix.to_str().unwrap()])
                 .output()
                 .unwrap();
             assert!(out.status.success());
