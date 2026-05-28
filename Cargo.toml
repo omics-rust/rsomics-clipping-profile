@@ -12,6 +12,11 @@ description = "Per-position soft-clipping profile from a BAM — Rust port of RS
 name = "rsomics-clipping-profile"
 path = "src/main.rs"
 
+
+[lib]
+name = "rsomics_clipping_profile"
+path = "src/lib.rs"
+doctest = false
 [dependencies]
 rsomics-common = { version = "0.6" }
 rsomics-bamio = { version = "0.1" }
