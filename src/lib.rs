@@ -60,13 +60,9 @@ const FLAG_QCFAIL: u16 = 0x0200;
 // BAM CIGAR operation codes.
 const OP_SOFT_CLIP: u8 = 4;
 
-/// Clipping profile: per-position clipped count, total passing-read count, read length.
 pub struct ClippingProfile {
-    /// Clipped read count per read cycle position (length = `read_length`).
     pub clip_count: Vec<u64>,
-    /// Total reads that passed the quality filters (used to derive non-clipped count).
     pub total_reads: u64,
-    /// Read cycle length (from first passing read's sequence length).
     pub read_length: usize,
 }
 
@@ -88,16 +84,8 @@ impl Layout {
     }
 }
 
-/// Per-read soft-clip positions in read-cycle coordinates (0-based).
-///
-/// For a forward read, position `i` is clipped when the CIGAR places an 'S'
-/// operation spanning query position `i`.
-///
-/// For a reverse-strand read, the CIGAR is still in read order (5'→3' of the
-/// original sequencing molecule), but `clipping_profile.py` reports clips in
-/// genomic/anti-sense order — effectively mirroring: position `i` maps to
-/// `read_length - 1 - i` in the output table. This reversal is applied by the
-/// caller after this function returns.
+// Returns 0-based query positions of soft-clip ops. Reverse-strand mirroring
+// is done by the caller.
 fn soft_clip_positions(rec: &RawRecord) -> Vec<usize> {
     let mut positions = Vec::new();
     let mut query_pos: usize = 0;
@@ -109,8 +97,7 @@ fn soft_clip_positions(rec: &RawRecord) -> Vec<usize> {
                 positions.push(i);
             }
         }
-        // Only M, I, S, =, X consume query bases (ops 0,1,4,7,8).
-        // D, N, H, P do not consume query bases.
+        // query-consuming ops: M I S = X
         match op {
             0 | 1 | 4 | 7 | 8 => query_pos += len,
             _ => {}
@@ -120,7 +107,6 @@ fn soft_clip_positions(rec: &RawRecord) -> Vec<usize> {
     positions
 }
 
-/// Scan BAM and accumulate clipping profile for SE layout.
 pub fn compute_se_pub(
     bam_path: &Path,
     mapq_cut: u8,
@@ -156,9 +142,8 @@ fn compute_se(bam_path: &Path, mapq_cut: u8, workers: NonZero<usize>) -> Result<
 
         let seq_len = rec.sequence_len();
         let rl = *read_length.get_or_insert_with(|| {
-            let len = seq_len;
-            clip_count = vec![0u64; len];
-            len
+            clip_count = vec![0u64; seq_len];
+            seq_len
         });
 
         total_reads += 1;
@@ -166,8 +151,6 @@ fn compute_se(bam_path: &Path, mapq_cut: u8, workers: NonZero<usize>) -> Result<
 
         for pos in soft_clip_positions(&rec) {
             if pos >= rl {
-                // Position beyond read_length: not counted (read is shorter than
-                // the first read; positions past rl are already excluded from the table).
                 continue;
             }
             let table_pos = if is_reverse { rl - 1 - pos } else { pos };
@@ -187,9 +170,6 @@ fn compute_se(bam_path: &Path, mapq_cut: u8, workers: NonZero<usize>) -> Result<
     })
 }
 
-/// Scan BAM and accumulate clipping profiles for PE layout (read-1 and read-2 separately).
-///
-/// Returns `(read1_profile, read2_profile)`.
 pub fn compute_pe(
     bam_path: &Path,
     mapq_cut: u8,
@@ -265,10 +245,7 @@ pub fn compute_pe(
     ))
 }
 
-/// Format a count for the `.xls` table.
-///
-/// Matches Python `%s` behaviour: `0` (int, no decimal) when the accumulator
-/// was never incremented; `"N.0"` (float representation) when N > 0.
+// Python `%s` of a float accumulator: "0" for zero, "N.0" otherwise.
 fn fmt_count(n: u64) -> String {
     if n == 0 {
         "0".to_string()
@@ -277,7 +254,6 @@ fn fmt_count(n: u64) -> String {
     }
 }
 
-/// Write a single clipping profile table to `<prefix>.<suffix>.clipping_profile.xls`.
 fn write_xls_section(
     w: &mut impl Write,
     profile: &ClippingProfile,
@@ -299,7 +275,6 @@ fn write_xls_section(
     Ok(())
 }
 
-/// Write the `.clipping_profile.xls` file.
 pub fn write_xls(
     out_prefix: &Path,
     layout: Layout,
@@ -334,7 +309,6 @@ pub fn write_xls(
     Ok(())
 }
 
-/// Write the `.clipping_profile.r` R script.
 pub fn write_r_script(out_prefix: &Path, profile: &ClippingProfile) -> Result<()> {
     let prefix_str = out_prefix
         .file_name()
@@ -363,7 +337,6 @@ pub fn write_r_script(out_prefix: &Path, profile: &ClippingProfile) -> Result<()
     Ok(())
 }
 
-/// Run the full clipping-profile analysis and write output files.
 pub fn run_clipping_profile(
     bam_path: &Path,
     out_prefix: &Path,
